@@ -9,3 +9,7 @@ fastapi-pagination
 'markitdown[all]'
 sentence_transformers
 python-multipart
+fastembed
+langchain
+langchain-community
+langchain_qdrant

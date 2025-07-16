@@ -11,7 +11,7 @@ search_router = APIRouter(prefix="/search", tags=["Search"])
 
 
 # Create a neural searcher instance
-indexer = IndexingPipeline(qdrant_url=settings.qdrant_url,)
+indexer = IndexingPipeline()
 
 
 UPLOAD_DIR = Path("file_upload")
@@ -19,7 +19,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 @search_router.get("/api/search")
 def search_startup(query: str):
-    return {"result": indexer.search(text=query)}
+    return {"result": indexer.search(query=query)}
 
 
 @search_router.post("/api/index")
@@ -31,9 +31,9 @@ async def index_file(file: UploadFile = File(...)):
         buffer.write(await file.read())
     # Index file vào Qdrant
     try:
-        count = indexer.index_file(filepath=str(file_path), tenant_id=tenant_id)
+        count = indexer.process_markdown_file(file_path=str(file_path))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Indexing failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Indexing failed: {e}")
 
     return {
         "message": "File uploaded and indexed",

@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 # khoi tao QdrantClient 
-client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+client = QdrantClient(url=settings.qdrant_url)
 if not client.collection_exists("startups"):
     client.create_collection(
         collection_name="startups",

@@ -33,4 +33,4 @@ async def root():
 
 
 if __name__ == "__main__":
-    uvicorn.run(api, host="0.0.0.0", port=8053, workers=1)
+    uvicorn.run(api, host="0.0.0.0", port=8053, workers=1) 
