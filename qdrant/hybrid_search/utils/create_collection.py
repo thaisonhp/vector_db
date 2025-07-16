@@ -34,7 +34,7 @@ def create_hybrid_rerank_collection(
     late_vecs = late_model.embed("test")
     # chọn kích thước của mỗi token vector (hàng đầu tiên)
     late_dim = len(list(late_vecs)[0][0])
-    print("late_dim:", late_dim)
+    print("late_interaction:", late_dim)
 
     # xóa collection cũ nếu tồn tại
     if client.collection_exists(collection_name):
@@ -46,7 +46,7 @@ def create_hybrid_rerank_collection(
         collection_name=collection_name,
         vectors_config={
             "dense": VectorParams(size=dense_dim, distance=Distance.COSINE),
-            "late_mode": VectorParams(
+            "late_interaction": VectorParams(
                 size=late_dim,
                 distance=Distance.COSINE,
                 multivector_config=MultiVectorConfig(

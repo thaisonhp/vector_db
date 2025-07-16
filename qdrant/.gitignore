@@ -189,6 +189,7 @@ cython_debug/
 # .vscode/
 
 # Ruff stuff:
+qdrant/qdrant_storage
 .ruff_cache/
 qdrant_storage/
 file_upload/

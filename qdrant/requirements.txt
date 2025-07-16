@@ -13,3 +13,5 @@ fastembed
 langchain
 langchain-community
 langchain_qdrant
+fastembed
+langchain_huggingface

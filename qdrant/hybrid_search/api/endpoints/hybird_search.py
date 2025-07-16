@@ -41,16 +41,3 @@ async def index_file(file: UploadFile = File(...)):
         # "tenant_id": tenant_id,
         "indexed_chunks": count
     }
-
-
-@search_router.get("/query")
-def search(query: str = Form(...), tenant_id: str = Form("common"), limit: int = 5):
-    hits = indexer.search(query=query, tenant_id=tenant_id, limit=limit)
-    # format payload-only response
-    result = [
-        {
-            "payload": hit.payload,
-            "score": getattr(hit, "score", None)
-        } for hit in hits
-    ]
-    return {"results": result}

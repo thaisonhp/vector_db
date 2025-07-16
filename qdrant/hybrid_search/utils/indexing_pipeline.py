@@ -70,9 +70,11 @@ class IndexingPipeline:
             )
             print(f"[INFO] Created new collection '{self.collection_name}'")
         else:
-            self.client.upload_points(
-                collection_name=self.collection_name,
-            )
+           self.client = client.collection_exists(
+               collection_name=self.collection_name
+           )
+           print(f"[INFO] Using existing collection '{self.collection_name}'")
+   
 
         # log verify types trước khi add
         print("[DEBUG] Before add_documents:")
@@ -101,7 +103,7 @@ class IndexingPipeline:
                 vector={
                     "dense": dense_embedding,
                     "sparse": bm25_embedding.as_object(),
-                    "late_mode": late_interaction_embedding,
+                    "late_interaction": late_interaction_embedding,
                 },
                 payload={"document": doc},
             )
@@ -131,7 +133,7 @@ class IndexingPipeline:
                 collection_name=settings.collection_name,
                 prefetch=prefetch,
                 query=late_vectors,
-                using="late_mode",
+                using="late_interaction",
                 with_payload=True,
                 limit=10,
         )
