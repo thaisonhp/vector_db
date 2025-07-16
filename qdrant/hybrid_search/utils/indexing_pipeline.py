@@ -3,20 +3,18 @@ from typing import List, Dict
 from dotenv import load_dotenv
 from utils.pasering.parser import MarkItDownParser
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import Qdrant
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Qdrant
+from langchain_huggingface import HuggingFaceEmbeddings
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
-    VectorParams,
-    Distance,
-    SparseVectorParams,
-    SparseIndexParams,
-    KeywordIndexParams,
+   PointStruct
 )
 from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from qdrant_client import models
 from core.config import settings, client
 from uuid import uuid4
+from fastembed import TextEmbedding, LateInteractionTextEmbedding, SparseTextEmbedding
+from utils.create_collection import create_hybrid_rerank_collection
 
 load_dotenv()
 
@@ -27,91 +25,120 @@ class IndexingPipeline:
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=512, chunk_overlap=50, length_function=len, add_start_index=True
         )
-        # Dense embedding
-        self.embedding_model = HuggingFaceEmbeddings(model_name=settings.embed_model_name)
-        # Sparse embedding: instance đúng kiểu
-        self.sparse = FastEmbedSparse(model_name=settings.sparse_model_name)
-        self.vector_store = None
-        print("[INIT] embedding_model:", self.embedding_model, "type:", type(self.embedding_model))
-        print("[INIT] sparse_embedding:", self.sparse, "type:", type(self.sparse))
-
         self.client = client
         self.collection_name = settings.collection_name
-
+        dense_embedding_model = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
+        self.embedding_model = dense_embedding_model
+        bm25_embedding_model = SparseTextEmbedding("Qdrant/bm25")
+        self.sparse_embedding_model = bm25_embedding_model
+        late_interaction_embedding_model = LateInteractionTextEmbedding(
+            "colbert-ir/colbertv2.0"
+        )
+        self.late_interaction_embedding_model = late_interaction_embedding_model
     def process_markdown_file(self, file_path: str):
         parsed = self.parser.parse(file_path)
         print(f"[DEBUG] Parsed text length: {len(parsed['text'])}")
 
-        docs = self.text_splitter.create_documents([parsed["text"]], metadatas=[{"source": file_path, **parsed["metadata"]}])
-        print(f"[DEBUG] Created {len(docs)} chunks")
+        documents = self.text_splitter.create_documents(
+            [parsed["text"]], metadatas=[{"source": file_path, **parsed["metadata"]}]
+        )
+        print(documents[:2])  # Show first 2 documents for debugging
+        print(f"[DEBUG] Created {len(documents)} chunks")
 
+        # embedding cac chunks
+        
         # kiểm tra collection Qdrant hiện có
         exists = self.client.collection_exists(self.collection_name)
         print(f"[DEBUG] Collection exists? → {exists}")
 
+        texts = [doc.page_content if isinstance(doc.page_content, str) else "" for doc in documents]
+        print(f"[DEBUG] Texts extracted: {len(texts)}")
+        dense_embeddings = list(self.embedding_model.embed(texts))
+        bm25_embeddings = list(self.sparse_embedding_model.embed(texts))
+        late_interaction_embeddings = list(self.late_interaction_embedding_model.embed(texts))
+
+        print(
+            f"[DEBUG] Embeddings created: {len(dense_embeddings)} dense, {len(bm25_embeddings)} sparse, {len(late_interaction_embeddings)} late-interaction"
+        )
         if not exists:
-            dim = self.embedding_model.embed_query("test").shape[-1]
-            print(f"[DEBUG] embedding dimension: {dim}")
-            self.client.create_collection(
-                collection_name=self.collection_name,
-                vectors_config={
-                    settings.dense_vector_name: VectorParams(size=dim, distance=Distance.COSINE)
-                },
-                sparse_vectors_config={settings.sparse_vector_name: SparseVectorParams()},
-            )
-            qdrant = QdrantVectorStore(
+            self.client = create_hybrid_rerank_collection(
                 client=self.client,
                 collection_name=self.collection_name,
-                embedding=self.embedding_model,
-                sparse_embedding=self.sparse,
-                retrieval_mode=RetrievalMode.HYBRID,
-                vector_name=settings.dense_vector_name,
-                sparse_vector_name=settings.sparse_vector_name,
+                dense_model=self.embedding_model,
+                sparse_model=self.sparse_embedding_model,
+                late_model=self.late_interaction_embedding_model,
             )
+            print(f"[INFO] Created new collection '{self.collection_name}'")
         else:
-            qdrant = QdrantVectorStore.from_existing_collection(
-                embedding=self.embedding_model,
-                sparse_embedding=self.sparse,
+            self.client.upload_points(
                 collection_name=self.collection_name,
-                url=settings.qdrant_url,
-                retrieval_mode=RetrievalMode.HYBRID,
-                vector_name=settings.dense_vector_name,
-                sparse_vector_name=settings.sparse_vector_name,
             )
-           
+
         # log verify types trước khi add
         print("[DEBUG] Before add_documents:")
         # print("  embedding type:", type(qdrant.embedding))
         # print("  sparse_embedding type:", type(qdrant.sparse_embedding))
-        print("  vector_name:", qdrant.vector_name)
-        print("  sparse_vector_name:", qdrant.sparse_vector_name)
+        # print("  vector_name:", qdrant.vector_name)
+        # print("  sparse_vector_name:", qdrant.sparse_vector_name)
 
-        uuids = [str(uuid4()) for _ in docs]
-        try:
-            qdrant.add_documents(documents=docs, ids=uuids)
-        except Exception as e:
-            print("[ERROR] add_documents failed:", e)
-            raise
+        points = []
+        for idx, (
+            dense_embedding,
+            bm25_embedding,
+            late_interaction_embedding,
+            doc,
+        ) in enumerate(
+            zip(
+                dense_embeddings,
+                bm25_embeddings,
+                late_interaction_embeddings,
+                documents,
+            )
+        ):
 
-        self.vector_store = qdrant
-        print(f"[INFO] Successfully indexed {len(docs)} docs into '{self.collection_name}'")
-        return len(docs)
+            point = PointStruct(
+                id=idx,
+                vector={
+                    "dense": dense_embedding,
+                    "sparse": bm25_embedding.as_object(),
+                    "late_mode": late_interaction_embedding,
+                },
+                payload={"document": doc},
+            )
+            points.append(point)
+        operation_info = client.upsert(
+            collection_name=settings.collection_name, points=points
+        )
+        return operation_info
 
     def search(self, query: str, limit: int = 5):
-        qdrant = QdrantVectorStore.from_existing_collection(
-                embedding=self.embedding_model,
-                sparse_embedding=self.sparse,
-                collection_name=self.collection_name,
-                url=settings.qdrant_url,
-                retrieval_mode=RetrievalMode.HYBRID,
-                vector_name=settings.dense_vector_name,
-                sparse_vector_name=settings.sparse_vector_name,
-            )
-        self.vector_store = qdrant
-        if not self.vector_store:
-            raise ValueError("Vector store is not initialized. Please index documents first.")
+        dense_vectors = next(self.embedding_model.query_embed(query))
+        sparse_vectors = next(self.sparse_embedding_model.query_embed(query))
+        late_vectors = next(self.late_interaction_embedding_model.query_embed(query))
+        prefetch = [
+            models.Prefetch(
+                query=dense_vectors,
+                using="dense",
+                limit=20,
+            ),
+            models.Prefetch(
+                query=models.SparseVector(**sparse_vectors.as_object()),
+                using="sparse",
+                limit=20,
+            ),
+        ]
+        results = client.query_points(
+                collection_name=settings.collection_name,
+                prefetch=prefetch,
+                query=late_vectors,
+                using="late_mode",
+                with_payload=True,
+                limit=10,
+        )
 
-        print(f"[DEBUG] Searching for query: {query} with limit: {limit}")
-        # Sử dụng vector_store để tìm kiếm
-        result = self.vector_store.similarity_search_with_score(query, k=limit, filter=None)
-        return result
+        # print(f"[DEBUG] Searching for query: {query} with limit: {limit}")
+        # # Sử dụng vector_store để tìm kiếm
+        # result = self.vector_store.similarity_search_with_score(
+        #     query, k=limit, filter=None
+        # )
+        return results

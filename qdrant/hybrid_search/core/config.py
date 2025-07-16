@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     sparse_model_name : str = os.getenv("SPARSE_MODEL_NAME", "prithivida/Splade_PP_en_v1")
     payload_path: Optional[str] = os.getenv("PAYLOAD_PATH", "qdrant/hybrid_search/data/startups_demo.json")
     embed_model_name: str = os.getenv("EMBED_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
+    late_model_name: str = os.getenv("LATE_MODEL_NAME", "colbert-ir/colbertv2.0")
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
