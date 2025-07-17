@@ -1,6 +1,7 @@
 from qdrant_client import QdrantClient, models
 from core.config import settings
 
+
 class HybridSearcher:
     DENSE_MODEL = settings.dense_model_name
     SPARSE_MODEL = settings.sparse_model_name
@@ -8,7 +9,7 @@ class HybridSearcher:
     def __init__(self, collection_name):
         self.collection_name = collection_name
         self.qdrant_client = QdrantClient()
-    
+
     def search(self, text: str):
         search_result = self.qdrant_client.query_points(
             collection_name=self.collection_name,

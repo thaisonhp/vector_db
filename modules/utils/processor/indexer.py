@@ -6,9 +6,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Qdrant
 from langchain_huggingface import HuggingFaceEmbeddings
 from qdrant_client import QdrantClient
-from qdrant_client.models import (
-   PointStruct
-)
+from qdrant_client.models import PointStruct
 from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from qdrant_client import models
 from core.config import settings, client
@@ -20,19 +18,19 @@ load_dotenv()
 
 
 class Indexer:
-    def __init__(self):
+    def __init__(self, collection_name: str = None):
         self.parser = MarkItDownParser()
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=512, chunk_overlap=50, length_function=len, add_start_index=True
         )
         self.client = client
-        self.collection_name = settings.collection_name
+        self.collection_name = collection_name or settings.collection_name
 
-        self.collection = None  # de chon ra collection de lam viec 
+        self.collection = None  # de chon ra collection de lam viec
 
         self.collection_manager = CollectionManager(self.client, self.collection_name)
         # khoi tao cac vector embedding models phuc vu cho  hybrid search + rerank
-        dense_embedding_model = TextEmbedding(settings.dense_embedding_model)
+        dense_embedding_model = TextEmbedding(settings.dense_model_name)
         self.embedding_model = dense_embedding_model
         bm25_embedding_model = SparseTextEmbedding(settings.bm25_embedding_model)
         self.sparse_embedding_model = bm25_embedding_model
@@ -40,7 +38,7 @@ class Indexer:
             settings.late_model_name
         )
         self.late_interaction_embedding_model = late_interaction_embedding_model
-    
+
     def indexing(self, file_path: str):
         parsed = self.parser.parse(file_path)
 
@@ -49,37 +47,34 @@ class Indexer:
         )
         print(documents[:2])  # Show first 2 documents for debugging
 
-        # embedding cac chunks
-        dense_embeddings = list(self.embedding_model.embed(texts))
-        bm25_embeddings = list(self.sparse_embedding_model.embed(texts))
-        late_interaction_embeddings = list(self.late_interaction_embedding_model.embed(texts))
-
-
         # kiểm tra collection Qdrant hiện có
         exists = self.client.collection_exists(self.collection_name)
         print(f"[DEBUG] Collection exists? → {exists}")
 
-        texts = [doc.page_content if isinstance(doc.page_content, str) else "" for doc in documents]
+        texts = [
+            doc.page_content if isinstance(doc.page_content, str) else ""
+            for doc in documents
+        ]
         print(f"[DEBUG] Texts extracted: {len(texts)}")
-        
+        # embedding cac chunks
+        dense_embeddings = list(self.embedding_model.embed(texts))
+        bm25_embeddings = list(self.sparse_embedding_model.embed(texts))
+        late_interaction_embeddings = list(
+            self.late_interaction_embedding_model.embed(texts)
+        )
         print(
             f"[DEBUG] Embeddings created: {len(dense_embeddings)} dense, {len(bm25_embeddings)} sparse, {len(late_interaction_embeddings)} late-interaction"
         )
         if not exists:
             self.collection = self.collection_manager.create_hybrid_rerank_collection(
-                client=self.client,
-                collection_name=self.collection_name,
                 dense_model=self.embedding_model,
                 sparse_model=self.sparse_embedding_model,
                 late_model=self.late_interaction_embedding_model,
             )
             print(f"[INFO] Created new collection '{self.collection_name}'")
         else:
-           self.collection = self.collection_manager.get_collection(
-               collection_name=self.collection_name
-           )
-           print(f"[INFO] Using existing collection '{self.collection_name}'")
-   
+            print(f"[INFO] Using existing collection '{self.collection_name}'")
+
         # upsert points to Qdrant collection
         points = []
         for idx, (
@@ -106,7 +101,7 @@ class Indexer:
                 payload={"document": doc},
             )
             points.append(point)
-        operation_info = self.collection.upsert(
+        operation_info = self.client.upsert(
             collection_name=settings.collection_name, points=points
         )
         return operation_info
@@ -127,18 +122,12 @@ class Indexer:
                 limit=20,
             ),
         ]
-        results = self.collection.query_points(
-                collection_name=settings.collection_name,
-                prefetch=prefetch,
-                query=late_vectors,
-                using="late_interaction",
-                with_payload=True,
-                limit=10,
+        results = self.client.query_points(
+            collection_name=settings.collection_name,
+            prefetch=prefetch,
+            query=late_vectors,
+            using="late_interaction",
+            with_payload=True,
+            limit=10,
         )
-
-        # print(f"[DEBUG] Searching for query: {query} with limit: {limit}")
-        # # Sử dụng vector_store để tìm kiếm
-        # result = self.vector_store.similarity_search_with_score(
-        #     query, k=limit, filter=None
-        # )
         return results

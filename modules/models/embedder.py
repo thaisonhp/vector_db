@@ -52,7 +52,7 @@ class EmbedIndexer:
                     self.sparse_model_name: models.SparseVectorParams()
                 },
             )
-            
+
             print(
                 f"Collection '{collection_name}' created with dense model '{self.dense_model_name}' and sparse model '{self.sparse_model_name}'."
             )

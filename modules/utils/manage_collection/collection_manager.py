@@ -10,12 +10,13 @@ from qdrant_client.models import (
 from qdrant_client import QdrantClient
 from fastembed import TextEmbedding, LateInteractionTextEmbedding, SparseTextEmbedding
 
+
 class CollectionManager:
     def __init__(self, client: QdrantClient, collection_name: str):
         self.client = client
         self.collection_name = collection_name
-        self.collection = None 
-        
+        self.collection = None
+
     def create_hybrid_rerank_collection(
         self,
         dense_model: TextEmbedding,
@@ -71,11 +72,7 @@ class CollectionManager:
         )
         return self.collection
 
-    def get_collection(self , collection_name: str):
-        self.collection = self.client.collection_exists(collection_name)
-        return self.collection
-
-    def delete_collection(self , collection_name: str):
+    def delete_collection(self, collection_name: str):
         if self.client.collection_exists(collection_name):
             print(f"[⚠️] Deleting existing '{collection_name}'…")
             self.client.delete_collection(collection_name)
