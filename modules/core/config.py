@@ -10,7 +10,13 @@ from qdrant_client.models import (
     MatchValue,
 )
 import os
+from graphiti_core import Graphiti
+from graphiti_core.nodes import EpisodeType
+from graphiti_core.search.search_config_recipes import NODE_HYBRID_SEARCH_RRF
+import logging
+
 from dotenv import load_dotenv
+from loguru import logger
 
 load_dotenv()
 
@@ -39,6 +45,10 @@ class Settings(BaseSettings):
     late_model_name: str = os.getenv("LATE_MODEL_NAME", "colbert-ir/colbertv2.0")
     bm25_embedding_model: str = os.getenv("BM25_EMBEDDING_MODEL", "Qdrant/bm25")
 
+    neo4j_uri: str =  os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
+    neo4j_user:str = os.environ.get('NEO4J_USER', 'neo4j')
+    neo4j_password: str = os.environ.get('NEO4J_PASSWORD', 'password')
+    openai_api_key: str = os.getenv("OPENAI_API_KEY")
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -46,15 +56,22 @@ class Settings(BaseSettings):
 
 settings = Settings()
 # khoi tao QdrantClient
-client = QdrantClient(url=settings.qdrant_url)
-if not client.collection_exists("startups"):
-    client.create_collection(
-        collection_name="startups",
-        vectors_config={
-            settings.dense_model_name: models.VectorParams(
-                size=client.get_embedding_size(settings.dense_model_name),
-                distance=models.Distance.COSINE,
-            )
-        },  # size and distance are model dependent
-        sparse_vectors_config={settings.sparse_model_name: models.SparseVectorParams()},
-    )
+# client = QdrantClient(url=settings.qdrant_url)
+# if not client.collection_exists("startups"):
+#     client.create_collection(
+#         collection_name="startups",
+#         vectors_config={
+#             settings.dense_model_name: models.VectorParams(
+#                 size=client.get_embedding_size(settings.dense_model_name),
+#                 distance=models.Distance.COSINE,
+#             )
+#         },  # size and distance are model dependent
+#         sparse_vectors_config={settings.sparse_model_name: models.SparseVectorParams()},
+#     )
+# Cấu hình logger
+handler = logging.StreamHandler()
+# hoặc có thể dùng SysLogHandler...
+logger.add(handler)
+# khoi tao graphiti
+
+graphiti = Graphiti(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)

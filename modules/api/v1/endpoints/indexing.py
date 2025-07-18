@@ -19,7 +19,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 @index_router.post("/api/index")
 async def index_file(
-    file: UploadFile = File(...), collection_name: str = Form(settings.collection_name)
+    file: UploadFile = File(...)
 ):
     if file.content_type not in [
         "application/pdf",
@@ -32,8 +32,8 @@ async def index_file(
         buffer.write(await file.read())
     # Index file vào Qdrant
     try:
-        count = indexer.add_file(
-            file_path=str(file_path), collection_name=collection_name
+        count = await indexer.add_file(
+            file_path=str(file_path)
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Indexing failed: {e}")

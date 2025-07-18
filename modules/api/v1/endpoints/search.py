@@ -14,7 +14,7 @@ retrivaler = RetrievalPipeline()
 
 
 @search_router.get("/api/search")
-def search_startup(query: str):
-    return {"result": retrivaler.retrieval(query=query)}
+async def search_startup(query: str, limit : int):
+    return await retrivaler.retrieval(query=query , limit=limit)
 
 

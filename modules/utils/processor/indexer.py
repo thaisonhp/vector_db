@@ -9,26 +9,33 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
 from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from qdrant_client import models
-from core.config import settings, client
+from core.config import settings
 from uuid import uuid4
 from fastembed import TextEmbedding, LateInteractionTextEmbedding, SparseTextEmbedding
 from utils.manage_collection.collection_manager import CollectionManager
+from models.chunker import MarkdownChunker
+from graphiti_core import Graphiti
+from graphiti_core.nodes import EpisodeType
+from core.config import graphiti
+from datetime import datetime ,timezone
 
+import json 
 load_dotenv()
 
 
 class Indexer:
     def __init__(self, collection_name: str = None):
         self.parser = MarkItDownParser()
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=512, chunk_overlap=50, length_function=len, add_start_index=True
-        )
-        self.client = client
+        # self.text_splitter = RecursiveCharacterTextSplitter(
+        #     chunk_size=512, chunk_overlap=50, length_function=len, add_start_index=True
+        # )
+        self.text_splitter = MarkdownChunker()
+        # self.client = client
         self.collection_name = collection_name or settings.collection_name
 
         self.collection = None  # de chon ra collection de lam viec
 
-        self.collection_manager = CollectionManager(self.client, self.collection_name)
+        # self.collection_manager = CollectionManager(self.client, self.collection_name)
         # khoi tao cac vector embedding models phuc vu cho  hybrid search + rerank
         dense_embedding_model = TextEmbedding(settings.dense_model_name)
         self.embedding_model = dense_embedding_model
@@ -39,95 +46,47 @@ class Indexer:
         )
         self.late_interaction_embedding_model = late_interaction_embedding_model
 
-    def indexing(self, file_path: str):
+    async def indexing(self, file_path: str):
         parsed = self.parser.parse(file_path)
-
-        documents = self.text_splitter.create_documents(
-            [parsed["text"]], metadatas=[{"source": file_path, **parsed["metadata"]}]
-        )
+        print("Parsed",parsed)
+        chunks = self.text_splitter.chunk(parsed["text"], source_file=file_path)
+        documents = [
+            {
+                "text": chunk.text,
+                "metadata": {
+                    "heading": chunk.heading,
+                    "source": chunk.file,
+                    **parsed["metadata"],
+                },
+            }
+            for chunk in chunks
+        ]
         print(documents[:2])  # Show first 2 documents for debugging
 
-        # kiểm tra collection Qdrant hiện có
-        exists = self.client.collection_exists(self.collection_name)
-        print(f"[DEBUG] Collection exists? → {exists}")
-
-        texts = [
-            doc.page_content if isinstance(doc.page_content, str) else ""
-            for doc in documents
-        ]
-        print(f"[DEBUG] Texts extracted: {len(texts)}")
-        # embedding cac chunks
-        dense_embeddings = list(self.embedding_model.embed(texts))
-        bm25_embeddings = list(self.sparse_embedding_model.embed(texts))
-        late_interaction_embeddings = list(
-            self.late_interaction_embedding_model.embed(texts)
-        )
-        print(
-            f"[DEBUG] Embeddings created: {len(dense_embeddings)} dense, {len(bm25_embeddings)} sparse, {len(late_interaction_embeddings)} late-interaction"
-        )
-        if not exists:
-            self.collection = self.collection_manager.create_hybrid_rerank_collection(
-                dense_model=self.embedding_model,
-                sparse_model=self.sparse_embedding_model,
-                late_model=self.late_interaction_embedding_model,
-            )
-            print(f"[INFO] Created new collection '{self.collection_name}'")
-        else:
-            print(f"[INFO] Using existing collection '{self.collection_name}'")
-
-        # upsert points to Qdrant collection
-        points = []
-        for idx, (
-            dense_embedding,
-            bm25_embedding,
-            late_interaction_embedding,
-            doc,
-        ) in enumerate(
-            zip(
-                dense_embeddings,
-                bm25_embeddings,
-                late_interaction_embeddings,
-                documents,
-            )
-        ):
-
-            point = PointStruct(
-                id=idx,
-                vector={
-                    "dense": dense_embedding,
-                    "sparse": bm25_embedding.as_object(),
-                    "late_interaction": late_interaction_embedding,
+        episodes = []
+        for i, text in enumerate(documents):
+            episodes.append({
+                'content':{
+                    "name":f"chunk {i}",
+                    "episode_body": text,
+                    "source_description": "mp ta ma nguon ",
                 },
-                payload={"document": doc},
+                'type': EpisodeType.json,
+                'description': 'podcast metadata',
+            })
+        print(episodes)
+        for i, episode in enumerate(episodes):
+            await graphiti.add_episode(
+                name=f'Freakonomics Radio {i}',
+                episode_body=json.dumps(episode['content']),
+                source=episode['type'],
+                source_description=episode['description'],
+                reference_time=datetime.now(timezone.utc),
             )
-            points.append(point)
-        operation_info = self.client.upsert(
-            collection_name=settings.collection_name, points=points
-        )
-        return operation_info
+            print(f'Added episode {i}')
+        return len(documents)
 
-    def search(self, query: str, limit: int = 5):
-        dense_vectors = next(self.embedding_model.query_embed(query))
-        sparse_vectors = next(self.sparse_embedding_model.query_embed(query))
-        late_vectors = next(self.late_interaction_embedding_model.query_embed(query))
-        prefetch = [
-            models.Prefetch(
-                query=dense_vectors,
-                using="dense",
-                limit=20,
-            ),
-            models.Prefetch(
-                query=models.SparseVector(**sparse_vectors.as_object()),
-                using="sparse",
-                limit=20,
-            ),
-        ]
-        results = self.client.query_points(
-            collection_name=settings.collection_name,
-            prefetch=prefetch,
-            query=late_vectors,
-            using="late_interaction",
-            with_payload=True,
-            limit=10,
-        )
+
+    async def search(self, query: str, limit: int = 5):
+        results = await graphiti.search(query , num_results=limit) # HYBIRD SEARCH + RANK :RRF 
         return results

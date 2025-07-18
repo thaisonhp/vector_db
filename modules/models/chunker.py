@@ -3,7 +3,7 @@ import re
 from typing import List
 from dataclasses import dataclass
 from pathlib import Path
-
+from core.config import logger
 
 @dataclass
 class Chunk:
@@ -37,4 +37,5 @@ class MarkdownChunker:
                     text="\n".join(current["text"]),
                 )
             )
+        logger.info(f"Chunked {len(chunks)} sections from {source_file}")
         return chunks

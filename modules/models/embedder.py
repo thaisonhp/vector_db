@@ -31,7 +31,7 @@ class EmbedIndexer:
         collection_name: str = settings.collection_name,
         embed_model: str = settings.embed_model_name,
     ):
-        self.client = QdrantClient(url=settings.qdrant_url)
+        # self.client = QdrantClient(url=settings.qdrant_url)
         self.embedder = SentenceTransformer(embed_model)
         self.collection_name = collection_name
         self.dense_model = settings.embed_model_name
@@ -98,33 +98,4 @@ class EmbedIndexer:
             )
         return len(points)
 
-    def search(self, query: str, tenant_id: str = "common", limit: int = 5):
-        # Build tenant filter
-        fl = Filter(
-            must=[FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id))]
-        )
 
-        # Prepare hybrid prefetch: dense embedding and sparse token vector
-        search_result = self.client.query_points(
-            collection_name=self.collection_name,
-            prefetch=[
-                Prefetch(
-                    query=Document(text=query, model=self.dense_model),
-                    using=self.dense_model,
-                    limit=limit * 2,
-                ),
-                Prefetch(
-                    query=Document(text=query, model=self.sparse_model),
-                    using=self.sparse_model,
-                    limit=limit * 2,
-                ),
-            ],
-            query=FusionQuery(fusion=models.Fusion.RRF),
-            query_filter=fl,
-            limit=limit,
-            with_payload=True,
-        ).points
-
-        # Return payload metadata + optionally score
-        metadata = [point.payload for point in search_result]
-        return metadata
